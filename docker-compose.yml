@@ -1,0 +1,78 @@
+services:
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+
+  ingestor:
+    build: ./python-ingestor
+    container_name: python-ingestor
+    restart: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - kafka
+
+  pyspark-consumer:
+    image: apache/spark:3.5.0 # Cleaner official tag
+    container_name: pyspark-consumer
+    user: root # Needed to ensure it can read the mounted volume
+    volumes:
+      - ./pyspark-consumer:/app
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - kafka
+    # In official Apache images, spark-submit is located here:
+    command: >
+      /opt/spark/bin/spark-submit 
+      --master local[*]
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0
+      spark_processor.py
+
+
+  flink-jobmanager:
+    image: flink:1.18.0
+    container_name: flink-jobmanager
+    ports:
+      - "8081:8081" # You can open http://localhost:8081 in your browser!
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+
+  flink-taskmanager:
+    image: flink:1.18.0
+    container_name: flink-taskmanager
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+
+  flink-processor:
+    build: ./flink-processor
+    container_name: flink-processor
+    depends_on:
+      - kafka
+      - flink-jobmanager
+    # This command tells the JAR to submit itself to the jobmanager service
+    command: flink run -m flink-jobmanager:8081 app.jar
