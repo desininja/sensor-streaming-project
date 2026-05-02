@@ -20,17 +20,16 @@ print("SPARK IS STARTING... WAITING FOR DATA")
 print("="*40 + "\n")
 
 schema = StructType([
-    StructField("sensor_id", StringType(), True),
-    StructField("temperature", DoubleType(), True),
-    StructField("humidity", DoubleType(), True),
-    StructField("timestamp", DoubleType(), True)
+    StructField("sensor_id", StringType()),
+    StructField("distance_cm", IntegerType()),
+    StructField("timestamp", DoubleType())
 ])
 
 
 df = (spark
       .readStream
       .format("kafka")
-      .option("kafka.bootstrap.servers", "kafka:9092")
+      .option("kafka.bootstrap.servers", "kafka:29092")
       .option("subscribe", "sensor-data")
       .option("startingOffsets", "latest")
       .load()

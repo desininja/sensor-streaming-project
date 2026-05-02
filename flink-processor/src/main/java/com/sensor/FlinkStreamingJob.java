@@ -11,7 +11,7 @@ public class FlinkStreamingJob {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
         KafkaSource<SensorReading> source = KafkaSource.<SensorReading>builder()
-                .setBootstrapServers("kafka:9092")
+                .setBootstrapServers("kafka:29092")
                 .setTopics("sensor-data")
                 .setGroupId("flink-group")
                 .setStartingOffsets(OffsetsInitializer.earliest())

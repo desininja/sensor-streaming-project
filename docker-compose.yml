@@ -5,27 +5,25 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      # ADDED PLAINTEXT_INTERNAL://:29092 here:
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
     ports:
       - "9092:9092"
-
-  ingestor:
-    build: ./python-ingestor
-    container_name: python-ingestor
-    restart: on-failure
-    environment:
-      - PYTHONUNBUFFERED=1
-    depends_on:
-      - kafka
-
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
   pyspark-consumer:
     image: apache/spark:3.5.0 # Cleaner official tag
     container_name: pyspark-consumer
@@ -36,7 +34,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
-      - kafka
+      kafka-init:
+        condition: service_completed_successfully
+
+
     # In official Apache images, spark-submit is located here:
     command: >
       /opt/spark/bin/spark-submit 
@@ -72,7 +73,20 @@ services:
     build: ./flink-processor
     container_name: flink-processor
     depends_on:
-      - kafka
-      - flink-jobmanager
+      kafka-init:
+        condition: service_completed_successfully
     # This command tells the JAR to submit itself to the jobmanager service
     command: flink run -m flink-jobmanager:8081 app.jar
+
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists --topic sensor-data --partitions 1 --replication-factor 1
+      echo 'Topic sensor-data created successfully!'
+      "
