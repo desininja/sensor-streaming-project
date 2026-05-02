@@ -1,4 +1,3 @@
-Here is your updated `README.md` file, incorporating the images and file references as requested.
 
 ---
 
