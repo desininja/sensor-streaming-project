@@ -1,42 +1,42 @@
-import time
+import serial
 import json
-import random 
+import time
 from kafka import KafkaProducer
 
+# Ensure this matches your 'ls /dev/cu.*' output
+SERIAL_PORT = '/dev/cu.usbmodem12101' 
 
-# connect to kafka container using the service name from docker-compose
-
-print("Producer waiting for Kafka...")
-while True:
-    try:
-        producer = KafkaProducer(
-            bootstrap_servers=['kafka:9092'],
-            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-            request_timeout_ms=5000  # Try for 5 seconds
-        )
-        break # Exit loop if connection is successful
-    except Exception as e:
-        print(f"Kafka not ready yet... retrying in 2 seconds. ({e})")
-        time.sleep(2)
-
-print("Connected! Sending data...")
+producer = KafkaProducer(
+    bootstrap_servers=['localhost:9092'],
+    api_version=(3,4,1), # Be specific
+    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+    acks=1, # Wait for leader to acknowledge
+    retries=5
+)
 
 try:
+    ser = serial.Serial(SERIAL_PORT, 9600, timeout=1)
+    print(f"--- Connected to Arduino on {SERIAL_PORT} ---")
+except Exception as e:
+    print(f"Serial Error: {e}")
+    print("Hint: Is the Arduino Serial Monitor closed?")
+    exit()
+try:
+
     while True:
-        #Simulate data
-        data = {
-            "sensor_id": "arduino_01",
-            "temperature":round(random.uniform(20.0,30.0),2),
-            "humidity": round(random.uniform(40.0, 60.0), 2),
-            "timestamp": time.time()
-        }
-
-        producer.send("sensor-data",value=data)
-        print(f"Sent: {data}")
-        time.sleep(3)
-
-except KeyboardInterrupt:
-    print("Stopping Kafka Producer.")
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8').strip()
+            try:
+                data = json.loads(line)
+                data['timestamp'] = time.time()
+            
+                producer.send('sensor-data', value=data)
+                print(f"Relayed to Kafka: {data}")
+            except json.JSONDecodeError:
+                # This handles the "Distance: 4 cm" vs JSON mismatch
+                print(f"Raw data (not JSON): {line}")
 
 finally:
-    producer.close()
+    if 'ser' in locals() and ser.is_open:
+        ser.close()
+        print("Serial port closed.")
